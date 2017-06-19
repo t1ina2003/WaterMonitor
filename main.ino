@@ -1,5 +1,5 @@
 // -------------- 溫度標頭檔 --------------
-#include <OneWire.h>
+#include <OneWire.h> 
 #include <DallasTemperature.h>
 // -------------- LCD標頭檔 --------------
 #include <Wire.h>
@@ -8,6 +8,9 @@
 #include <Bridge.h>
 #include <BridgeClient.h>
 #include <BridgeServer.h>
+// -------------- 馬達標頭檔 --------------
+#include <Servo.h>
+#include <Timer.h>
 
 // -------------- 溫度參數 --------------連接於Arduino Digital Input 2 
 #define ONE_WIRE_BUS 4
@@ -18,7 +21,7 @@ DeviceAddress insideThermometer = { 0x28, 0xFF, 0x45, 0xA8, 0xA0, 0x16, 0x04, 0x
 
 // -------------- pH值參數量 --------------連接於Arduino Analog Input 0 (A0)
 #define pHSensorPin A2    //pH值pin腳
-#define Offset 0.00       //誤差補償
+#define Offset -10.00       //誤差補償
 static float pHValue,pHvoltage;
 
 //-------------- 水深參數 --------------連接於Arduino Analog Input 1 (A1)
@@ -32,10 +35,30 @@ const int colorG = 0;
 const int colorB = 255;
 
 //-------------- 上傳influxDB參數 --------------
-IPAddress server(192,168,2,105);
+IPAddress server(192,168,43,140);
 BridgeClient client;
 String data ="";
-#define uploadSpeed 2500    //上傳速率(毫秒)
+#define uploadSpeed 1000    //上傳速率(毫秒)
+
+//-------------- 馬達參數 --------------
+Servo myservo;  // create servo object to control a servo
+Timer tcb;
+int pos = 0;    // variable to store the servo position
+#define degree 120    //馬達轉角度
+void servoTurn(){
+  for (pos = 0; pos <= degree; pos += 1) { // goes from 0 degrees to 180 degrees
+    // in steps of 1 degree
+    myservo.write(pos);              // tell servo to go to position in variable 'pos'
+    delay(15);                       // waits 15ms for the servo to reach the position
+  }
+  for (pos = degree; pos >= 0; pos -= 1) { // goes from 180 degrees to 0 degrees
+    myservo.write(pos);              // tell servo to go to position in variable 'pos'
+    delay(15);                       // waits 15ms for the servo to reach the position
+  }
+}
+
+//-------------- 蜂鳴器參數 --------------
+const int buzzer = 8; //pin腳設定
 
 void setup(void)
 {
@@ -49,6 +72,13 @@ void setup(void)
   //-------------- LCD初始化 --------------
   lcd.begin(16, 2);
   lcd.setRGB(colorR, colorG, colorB);
+
+  //-------------- 馬達初始化 --------------
+  myservo.attach(6);  
+  tcb.every(180000, servoTurn); // 每經過1000毫秒，就會呼叫servoTurn
+  
+  //-------------- 蜂鳴器初始化 --------------
+  pinMode(buzzer, OUTPUT); // Set buzzer - pin 9 as an output
 }
 
 void loop(void)
@@ -97,13 +127,12 @@ void loop(void)
   // -------------- infulxDB處理 --------------
   if (client.connect(server, 8086)) 
   {
-//    SerialUSB.println("connected");
     delay(uploadSpeed);
     data="WaterMonitor,device=Temperature value="+String(Temperature)+
       "\nWaterMonitor,device=pHValue value="+String(pHValue)+
       "\nWaterMonitor,device=waterDepthValue value="+String(waterDepthValue);
     
-    client.println("POST /write?db=arduino HTTP/1.1");
+    client.println("POST /write?db=Fish_IoT HTTP/1.1");
     client.print("Content-length:");
     client.println(data.length());
     client.println("Connection: Close");
@@ -112,18 +141,23 @@ void loop(void)
     client.println();
     client.println(data);     //send data
   }else{
-//    SerialUSB.println("connection failed");
+
   }
   if (client.available()) {
     char c = client.read();
-//    SerialUSB.print(c);  
   }
   if (!client.connected()) {
-//    SerialUSB.println("disconnecting.");
     client.stop();
   }
 
-//  SerialUSB.println(" ");
+  // -------------- 馬達處理 --------------
+  tcb.update();
+
+  // -------------- 蜂鳴器處理 --------------
+  if(Temperature>28 || Temperature<25 || pHValue<6.8 || pHValue>7.4 || waterDepthValue<2){
+    tone(buzzer, 1); // Send 1KHz sound signal...
+  }else{
+    noTone(buzzer);     // Stop sound...
+  }
   delay(100);
 }
-
